@@ -91,7 +91,8 @@ def monitor_clear_mode(driver, stop_event):
             else:
                 # Debug: If not found, what DOES the page contain?
                 if iteration % 10 == 0:
-                    print(f"[Debug] Page text snippet: {page_text[:100].replace('\n', ' ')}...")
+                    snippet = page_text[:100].replace('\n', ' ')
+                    print(f"[Debug] Page text snippet: {snippet}...")
 
             # Check 2: Explicit "Clear Screen" button REMOVED as per user request.
             # We now rely SOLELY on "看相关" to detect normal mode.
@@ -178,14 +179,16 @@ def open_douyin_landscape():
     if not is_port_open(DEBUG_PORT):
         launch_chrome_detached()
     else:
-        print(f"Found existing Chrome on port {DEBUG_PORT}. Connecting...")
+        print(f"Found existing Chrome on port {DEBUG_PORT}. Connecting...", flush=True)
 
     # 2. Connect Selenium to the existing/new Chrome
     chrome_options = Options()
     chrome_options.add_experimental_option("debuggerAddress", f"127.0.0.1:{DEBUG_PORT}")
 
     try:
+        print("正在创建 WebDriver 实例...", flush=True)
         driver = webdriver.Chrome(options=chrome_options)
+        print("WebDriver 连接成功!", flush=True)
         
         # Ensure window size is correct
         try:
