@@ -1,9 +1,11 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
+from webdriver_manager.chrome import ChromeDriverManager
 import sys
 import os
 import threading
@@ -187,7 +189,10 @@ def open_douyin_landscape():
 
     try:
         print("正在创建 WebDriver 实例...", flush=True)
-        driver = webdriver.Chrome(options=chrome_options)
+        # When connecting to existing Chrome via debuggerAddress, we still need chromedriver
+        # but webdriver-manager will handle the driver installation automatically
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         print("WebDriver 连接成功!", flush=True)
         
         # Ensure window size is correct
