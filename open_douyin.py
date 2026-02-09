@@ -12,10 +12,57 @@ import threading
 import time
 import subprocess
 import socket
+import cv2
+import numpy as np
+from PIL import Image
+import io
 
 # Configuration
 DEBUG_PORT = 9222
 CHROME_USER_DATA_DIR = os.path.join(os.getcwd(), "chrome_user_data")
+CLEAR_BUTTON_OFF = "/Users/zhutaoyu/Downloads/clear.png"  # 清屏按钮关闭状态
+CLEAR_BUTTON_ON = "/Users/zhutaoyu/Downloads/clear-open.png"  # 清屏按钮打开状态
+
+def find_image_on_screen(driver, template_path, threshold=0.8):
+    """
+    在屏幕截图底部区域中查找模板图片
+    返回: True 如果找到, False 如果未找到
+    """
+    try:
+        # 读取模板图片
+        template = cv2.imread(template_path)
+        if template is None:
+            print(f"无法读取模板图片: {template_path}")
+            return False
+
+        template_height = template.shape[0]
+        template_width = template.shape[1]
+
+        # 截取当前页面
+        screenshot = driver.get_screenshot_as_png()
+        screenshot_img = Image.open(io.BytesIO(screenshot))
+        screenshot_cv = cv2.cvtColor(np.array(screenshot_img), cv2.COLOR_RGB2BGR)
+
+        # 截取底部区域，高度至少要大于模板图片高度
+        height = screenshot_cv.shape[0]
+        crop_height = max(200, template_height + 50)  # 至少200px或模板高度+50px
+        screenshot_cv = screenshot_cv[height-crop_height:height, :]
+
+        # 确保截图区域大于模板图片
+        if screenshot_cv.shape[0] < template_height or screenshot_cv.shape[1] < template_width:
+            print(f"截图区域 ({screenshot_cv.shape[1]}x{screenshot_cv.shape[0]}) 小于模板图片 ({template_width}x{template_height})")
+            return False
+
+        # 模板匹配
+        result = cv2.matchTemplate(screenshot_cv, template, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+
+        if max_val >= threshold:
+            return True
+        return False
+    except Exception as e:
+        print(f"图片匹配错误: {e}")
+        return False
 
 def is_port_open(port):
     """Check if a port is open on localhost."""
@@ -79,41 +126,43 @@ def monitor_clear_mode(driver, stop_event):
             # We look for them to determine if we need to act.
             is_cluttered = False
             clutter_reason = ""
-            
-            # Check 1: Sidebar elements
-            # METHOD CHANGE: Use JS to get full page text. This is more reliable than XPath for "existence" checks.
-            # We intentionally do NOT wrap this in a broad try-except that swallows the error.
-            # If the window is closed, execute_script will raise WebDriverException, 
-            # which will be caught by the OUTER exception handler to trigger window recovery.
-            page_text = driver.execute_script("return document.body.innerText;")
-            
-            if "看相关" in page_text:
+
+            # Check 1: 使用图片匹配检测"清屏"按钮状态
+            # 两张图片很接近，需要提高匹配阈值并优先检测打开状态
+            print(f"[{time.strftime('%H:%M:%S')}] 检测清屏状态...")
+            button_on_found = find_image_on_screen(driver, CLEAR_BUTTON_ON, threshold=0.95)
+            button_off_found = find_image_on_screen(driver, CLEAR_BUTTON_OFF, threshold=0.95)
+
+            if button_on_found and not button_off_found:
+                # 清屏按钮已打开，已经在清屏模式
+                is_cluttered = False
+            elif button_off_found and not button_on_found:
+                # 清屏按钮关闭，需要按 J 键
                 is_cluttered = True
-                clutter_reason = "Found '看相关' in page text"
+                clutter_reason = "Found '清屏' button (OFF) in screenshot"
+
+                # 尝试提取集数信息
+                import re
+                page_text = driver.execute_script("return document.body.innerText;")
+                episode_match = re.search(r'第(\d+)集', page_text)
+                if episode_match:
+                    episode_num = episode_match.group(1)
+                    print(f"[{time.strftime('%H:%M:%S')}] 第{episode_num}集 - 需要清屏")
+            elif button_on_found and button_off_found:
+                # 两个都匹配到了，说明阈值太低，优先认为是打开状态
+                is_cluttered = False
             else:
-                # Debug: If not found, what DOES the page contain?
-                if iteration % 10 == 0:
-                    snippet = page_text[:100].replace('\n', ' ')
-                    print(f"[Debug] Page text snippet: {snippet}...")
+                # 没有找到任何清屏按钮
+                pass
 
             # Check 2: Explicit "Clear Screen" button REMOVED as per user request.
-            # We now rely SOLELY on "看相关" to detect normal mode.
+            # We now rely SOLELY on image matching to detect clear mode.
 
             if not is_cluttered:
                 # If no clutter is visible, we are likely already in Clear Mode.
-                if iteration % 5 == 0:
-                     print(f"[{time.strftime('%H:%M:%S')}] State: Clear Mode Active ('看相关' hidden). Standing by.")
                 time.sleep(1)
-                # continue 
-                # COMMENTED OUT 'continue' TEMPORARILY: 
-                # If detection is failing, this 'continue' prevents the script from working.
-                # For now, we will proceed to check the button text as a secondary confirmation.
-            
-            # If we reach here, either Clutter is detected OR we are fallback checking.
-            if iteration % 5 == 0:
-                mode_str = "Normal Mode" if is_cluttered else "Potential Clear Mode ('看相关' not found)"
-                print(f"[{time.strftime('%H:%M:%S')}] State: {mode_str}. Scanning logic...")
-            
+                continue
+
             # ACTION: If clutter is detected, press 'J' to toggle Clear Mode
             if is_cluttered:
                 print(f"[{time.strftime('%H:%M:%S')}] {clutter_reason}. Sending 'J' key to clear screen...")
@@ -197,8 +246,9 @@ def open_douyin_landscape():
         
         # Ensure window size is correct
         try:
-            target_width = 1280
-            target_height = 720
+            # 原始大小 1280x720，缩小 20% 后为 1024x576
+            target_width = 1024
+            target_height = 576
             driver.set_window_size(target_width, target_height)
         except:
             # Sometimes setting window size on an attached session might fail or be unnecessary
