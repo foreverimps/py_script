@@ -23,6 +23,9 @@ CHROME_USER_DATA_DIR = os.path.join(os.getcwd(), "chrome_user_data")
 CLEAR_BUTTON_OFF = "/Users/zhutaoyu/Downloads/clear.png"  # 清屏按钮关闭状态
 CLEAR_BUTTON_ON = "/Users/zhutaoyu/Downloads/clear-open.png"  # 清屏按钮打开状态
 
+# 清屏计数器：记录每一集的清屏次数
+clear_screen_counter = {}
+
 def find_image_on_screen(driver, template_path, threshold=0.8):
     """
     在屏幕截图底部区域中查找模板图片
@@ -62,6 +65,21 @@ def find_image_on_screen(driver, template_path, threshold=0.8):
         return False
     except Exception as e:
         print(f"图片匹配错误: {e}")
+        return False
+
+def stop_screen_recording():
+    """按下 Command + Control + Esc 结束录屏"""
+    try:
+        print(f"[{time.strftime('%H:%M:%S')}] 按下 Command + Control + Esc 结束录屏...")
+        # 使用 osascript 模拟按键
+        subprocess.run([
+            'osascript', '-e',
+            'tell application "System Events" to key code 53 using {command down, control down}'
+        ], check=True)
+        print("录屏结束命令已发送")
+        return True
+    except Exception as e:
+        print(f"结束录屏失败: {e}")
         return False
 
 def is_port_open(port):
@@ -146,8 +164,12 @@ def monitor_clear_mode(driver, stop_event):
                 page_text = driver.execute_script("return document.body.innerText;")
                 episode_match = re.search(r'第(\d+)集', page_text)
                 if episode_match:
-                    episode_num = episode_match.group(1)
+                    episode_num = int(episode_match.group(1))
                     print(f"[{time.strftime('%H:%M:%S')}] 第{episode_num}集 - 需要清屏")
+
+                    # 记录清屏次数
+                    if episode_num not in clear_screen_counter:
+                        clear_screen_counter[episode_num] = 0
             elif button_on_found and button_off_found:
                 # 两个都匹配到了，说明阈值太低，优先认为是打开状态
                 is_cluttered = False
@@ -171,7 +193,24 @@ def monitor_clear_mode(driver, stop_event):
                     actions = ActionChains(driver)
                     actions.send_keys("j").perform()
                     print("Sent 'J' key.")
-                    
+
+                    # 获取当前集数并增加清屏计数
+                    import re
+                    page_text = driver.execute_script("return document.body.innerText;")
+                    episode_match = re.search(r'第(\d+)集', page_text)
+                    if episode_match:
+                        episode_num = int(episode_match.group(1))
+                        if episode_num not in clear_screen_counter:
+                            clear_screen_counter[episode_num] = 0
+                        clear_screen_counter[episode_num] += 1
+                        print(f"[{time.strftime('%H:%M:%S')}] 第{episode_num}集 - 第{clear_screen_counter[episode_num]}次清屏")
+
+                        # 检查是否是第二集的第二次清屏
+                        if episode_num == 2 and clear_screen_counter[episode_num] == 2:
+                            print(f"[{time.strftime('%H:%M:%S')}] 检测到第二集第二次清屏，准备结束录屏...")
+                            time.sleep(1)  # 等待清屏完成
+                            stop_screen_recording()
+
                     # Wait for UI to update
                     time.sleep(3)
                 except Exception as e:
@@ -269,13 +308,23 @@ def open_douyin_landscape():
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("\nStopping script...")
+            print("\n[退出] 脚本已停止，浏览器保持打开状态")
             stop_event.set()
-            # Do NOT call driver.quit() here, so browser stays open
-            
+            monitor_thread.join(timeout=2)
+            # Detach driver from browser by clearing the command executor
+            driver.command_executor._conn = None
+            del driver
+            print("浏览器已保持打开，可以继续使用")
+            return
+
+    except KeyboardInterrupt:
+        # Handle Ctrl+C at outer level too
+        print("\n[退出] 脚本已停止，浏览器保持打开状态")
+        return
     except Exception as e:
         print(f"Error connecting to Chrome: {e}")
         print("Try closing all Chrome instances and running again.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     open_douyin_landscape()
