@@ -277,9 +277,15 @@ def open_douyin_landscape():
 
     try:
         print("正在创建 WebDriver 实例...", flush=True)
-        # When connecting to existing Chrome via debuggerAddress, we still need chromedriver
-        # but webdriver-manager will handle the driver installation automatically
-        service = Service(ChromeDriverManager().install())
+        # Use cached chromedriver directly to avoid slow network checks
+        chromedriver_path = os.path.expanduser("~/.wdm/drivers/chromedriver/mac64/144.0.7559.133/chromedriver-mac-x64/chromedriver")
+        if os.path.exists(chromedriver_path):
+            print(f"使用缓存的 ChromeDriver: {chromedriver_path}", flush=True)
+            service = Service(chromedriver_path)
+        else:
+            print("正在安装/检查 ChromeDriver...", flush=True)
+            service = Service(ChromeDriverManager().install())
+        print("ChromeDriver 准备完成，正在连接浏览器...", flush=True)
         driver = webdriver.Chrome(service=service, options=chrome_options)
         print("WebDriver 连接成功!", flush=True)
         
