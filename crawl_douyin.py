@@ -7,6 +7,9 @@ import os
 import base64
 import requests
 
+# Configuration
+BROWSER_DATA_DIR = os.path.join(os.getcwd(), ".browser_data")
+
 def sanitize_filename(name):
     """Remove invalid characters from filename"""
     import re
@@ -194,9 +197,8 @@ def crawl_douyin(start_url, start_index=1, count=50, output_file="crawled_data.j
     captured_video_urls = []
 
     # Create user data directory to persist login state
-    user_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".browser_data")
-    if not os.path.exists(user_data_dir):
-        os.makedirs(user_data_dir)
+    if not os.path.exists(BROWSER_DATA_DIR):
+        os.makedirs(BROWSER_DATA_DIR)
         print("📁 Created browser data directory for persistent login")
 
     with sync_playwright() as p:
@@ -204,7 +206,7 @@ def crawl_douyin(start_url, start_index=1, count=50, output_file="crawled_data.j
 
         # Launch browser with persistent context
         context = p.chromium.launch_persistent_context(
-            user_data_dir,
+            BROWSER_DATA_DIR,
             headless=False,
             args=["--start-maximized"],
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -232,7 +234,7 @@ def crawl_douyin(start_url, start_index=1, count=50, output_file="crawled_data.j
         # Increase timeout and use domcontentloaded instead of load
         page.goto(start_url, timeout=60000, wait_until="domcontentloaded")
         time.sleep(5)
-        
+
         try:
             close_btn = page.locator(".dy-account-close")
             if close_btn.is_visible():
@@ -243,18 +245,18 @@ def crawl_douyin(start_url, start_index=1, count=50, output_file="crawled_data.j
         for i in range(count):
             current_index = start_index + i
             print(f"\n[Episode {current_index}] Processing...")
-            
+
             video_info = {
                 "episode_index": current_index,
                 "url": None,
                 "title": f"Episode_{current_index}", # Default
                 "collection_raw": "Unknown"
             }
-            
+
             try:
                 page.wait_for_selector('video', timeout=10000)
                 time.sleep(2)
-                
+
                 # 1. Extract Video Source
                 video_element = page.locator("video").first
                 video_src = video_element.get_attribute("src")
@@ -262,11 +264,11 @@ def crawl_douyin(start_url, start_index=1, count=50, output_file="crawled_data.j
                      src_element = video_element.locator("source").first
                      if src_element.count() > 0:
                          video_src = src_element.get_attribute("src")
-                
+
                 if video_src:
                     video_info["url"] = video_src
                     print(f"  URL: {video_src[:40]}...")
-                
+
                 # 2. Extract Title (Episode Name)
                 # Try h1 first, then fallback
                 try:
@@ -288,10 +290,10 @@ def crawl_douyin(start_url, start_index=1, count=50, output_file="crawled_data.j
                     collection_els = page.get_by_text("·").all()
                     for el in collection_els:
                         text = el.inner_text()
-                        if "短剧" in text or "剧场" in text or len(text) < 50: 
+                        if "短剧" in text or "剧场" in text or len(text) < 50:
                             video_info["collection_raw"] = text.strip()
                             break
-                    
+
                     if video_info["collection_raw"] == "Unknown":
                          mix_el = page.get_by_text("短剧").first
                          if mix_el.count() > 0:
@@ -398,7 +400,7 @@ def crawl_douyin(start_url, start_index=1, count=50, output_file="crawled_data.j
                         if not new_src:
                             s = new_video.locator("source").first
                             if s.count() > 0: new_src = s.get_attribute("src")
-                            
+
                         if new_src and new_src != previous_src:
                             break
                     except: pass
